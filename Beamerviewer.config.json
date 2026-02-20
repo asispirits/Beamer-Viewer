@@ -1,0 +1,10 @@
+{
+  "ProductId": "vEjlRlWp82033",
+  "UserId": "",
+  "RefreshMs": 5000,
+  "WidgetWidth": 520,
+  "AutoOpenOnLaunch": true,
+  "ManualCloseCooldownMs": 6000,
+  "PulseOnNewMessage": true,
+  "PulseMinIntervalMs": 15000
+}
