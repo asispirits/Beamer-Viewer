@@ -14,9 +14,13 @@ public sealed class AppConfig
   public int WidgetWidth { get; set; } = 520;
   public bool AutoOpenOnLaunch { get; set; } = true;
 
-  public long ManualCloseCooldownMs { get; set; } = 6000;
+  public long ManualCloseCooldownMs { get; set; } = 6_000;
   public bool PulseOnNewMessage { get; set; } = true;
   public long PulseMinIntervalMs { get; set; } = 15_000;
+
+  public bool ForceForegroundOnUrgent { get; set; } = false;
+  public int UrgentFocusUnreadDelta { get; set; } = 3;
+  public long FocusStealCooldownMs { get; set; } = 45_000;
 
   public static readonly string FileName = "beamerviewer.config.json";
 
@@ -50,7 +54,8 @@ public sealed class AppConfig
   {
     if (string.IsNullOrWhiteSpace(cfg.ProductId)) cfg.ProductId = "vEjlRlWp82033";
     if (string.IsNullOrWhiteSpace(cfg.UserId)) cfg.UserId = $"local-{Guid.NewGuid()}";
-    if (cfg.RefreshMs < 15_000) cfg.RefreshMs = 60_000;
+
+    if (cfg.RefreshMs < 15_000) cfg.RefreshMs = 15_000;
     if (cfg.WidgetWidth < 320) cfg.WidgetWidth = 520;
 
     if (cfg.ManualCloseCooldownMs < 0) cfg.ManualCloseCooldownMs = 0;
@@ -58,6 +63,12 @@ public sealed class AppConfig
 
     if (cfg.PulseMinIntervalMs < 0) cfg.PulseMinIntervalMs = 0;
     if (cfg.PulseMinIntervalMs > 600_000) cfg.PulseMinIntervalMs = 600_000;
+
+    if (cfg.UrgentFocusUnreadDelta < 1) cfg.UrgentFocusUnreadDelta = 1;
+    if (cfg.UrgentFocusUnreadDelta > 50) cfg.UrgentFocusUnreadDelta = 50;
+
+    if (cfg.FocusStealCooldownMs < 0) cfg.FocusStealCooldownMs = 0;
+    if (cfg.FocusStealCooldownMs > 600_000) cfg.FocusStealCooldownMs = 600_000;
 
     return cfg;
   }

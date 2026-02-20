@@ -79,6 +79,7 @@
         const BEAMER_SRC = "https://app.getbeamer.com/js/beamer-embed.js";
 
         let refreshTimer = null;
+        let heartbeatTimer = null;
         let booted = false;
         let refreshing = false;
 
@@ -88,6 +89,9 @@
         let pulseOnNewMessage = true;
         let pulseMinIntervalMs = 15000;
         let lastPulseAt = 0;
+
+        let syncScheduled = false;
+        let lastOpen = null;
 
         function now() { return Date.now(); }
         function bellEl() { return document.getElementById("beamerBell"); }
@@ -144,8 +148,6 @@
           return false;
         }
 
-        let lastOpen = null;
-
         function beamerReady() {
           return typeof window.Beamer === "object" && typeof window.Beamer.show === "function";
         }
@@ -179,14 +181,23 @@
           if (!open) forceBellVisible();
         }
 
+        function scheduleSync(delayMs = 50) {
+          if (syncScheduled) return;
+          syncScheduled = true;
+          setTimeout(() => {
+            syncScheduled = false;
+            syncOpenState();
+          }, delayMs);
+        }
+
         function markManualClose() {
           lastManualCloseAt = now();
           document.body.classList.remove("beamer-open");
           lastOpen = false;
           forceBellVisible();
-          setTimeout(syncOpenState, 50);
-          setTimeout(syncOpenState, 250);
-          setTimeout(syncOpenState, 900);
+          scheduleSync(50);
+          scheduleSync(250);
+          scheduleSync(900);
         }
 
         function clickIsInsideWidget(target) {
@@ -228,8 +239,15 @@
           return false;
         }
 
-        const observer = new MutationObserver(() => syncOpenState());
-        observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+        const observer = new MutationObserver(() => scheduleSync(30));
+        observer.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["class", "style", "hidden", "aria-hidden"]
+        });
+
+        document.addEventListener("visibilitychange", () => scheduleSync(30), true);
 
         document.addEventListener("click", (e) => {
           const t = e.target;
@@ -241,11 +259,6 @@
           if (e.key !== "Escape") return;
           if (isWidgetOpenByDom()) markManualClose();
         }, true);
-
-        setInterval(() => {
-          syncOpenState();
-          forceBellVisible();
-        }, 250);
 
         function pulseBell() {
           if (!pulseOnNewMessage) return;
@@ -361,65 +374,67 @@
           if (refreshing) return;
           refreshing = true;
 
-          const wasOpen = isWidgetOpenByDom();
-          const beforeUnread = readPossibleUnreadCount();
-
-          tryHideWidget();
-          removeKnownBeamerDom();
-
           try {
-            await loadBeamerScript();
-          } catch (_) {
-            refreshing = false;
-            syncOpenState();
-            return;
-          }
+            const wasOpen = isWidgetOpenByDom();
+            const beforeUnread = readPossibleUnreadCount();
 
-          const ok = await waitForBeamerReady();
-          syncOpenState();
+            tryHideWidget();
+            removeKnownBeamerDom();
 
-          const afterUnread = readPossibleUnreadCount();
-
-          const hasNew =
-            (typeof beforeUnread === "number" && typeof afterUnread === "number" && afterUnread > beforeUnread) ||
-            (typeof beforeUnread !== "number" && typeof afterUnread === "number" && afterUnread > 0);
-
-          let delta = null;
-          if (typeof beforeUnread === "number" && typeof afterUnread === "number") delta = afterUnread - beforeUnread;
-
-          const dt = now() - lastManualCloseAt;
-          const inCooldown = dt >= 0 && dt < manualCloseCooldownMs;
-
-          const urgent =
-            (delta !== null && delta > 1) ||
-            inCooldown ||
-            (beforeUnread === null && typeof afterUnread === "number" && afterUnread > 0);
-
-          if (hasNew)
-          {
-            postToHost("new_message", { unread: afterUnread, delta });
-
-            if (urgent)
-            {
-              postToHost("urgent_message", {
-                unread: afterUnread,
-                delta,
-                reason: (delta !== null && delta > 1) ? "batch" : (inCooldown ? "cooldown" : "unknown_to_known")
-              });
-              if (ok) {
-                lastManualCloseAt = 0;
-                tryShow();
-              }
+            try {
+              await loadBeamerScript();
+            } catch (_) {
+              scheduleSync(30);
+              return;
             }
 
-            if (!document.body.classList.contains("beamer-open")) pulseBell();
-          }
+            const ok = await waitForBeamerReady();
+            scheduleSync(30);
 
-          if (ok && shouldReopenAfterRefresh(wasOpen)) {
-            tryShow();
-          }
+            const afterUnread = readPossibleUnreadCount();
 
-          refreshing = false;
+            const hasNew =
+              (typeof beforeUnread === "number" && typeof afterUnread === "number" && afterUnread > beforeUnread) ||
+              (typeof beforeUnread !== "number" && typeof afterUnread === "number" && afterUnread > 0);
+
+            let delta = null;
+            if (typeof beforeUnread === "number" && typeof afterUnread === "number") delta = afterUnread - beforeUnread;
+
+            const dt = now() - lastManualCloseAt;
+            const inCooldown = dt >= 0 && dt < manualCloseCooldownMs;
+
+            const urgent =
+              (delta !== null && delta > 1) ||
+              inCooldown ||
+              (beforeUnread === null && typeof afterUnread === "number" && afterUnread > 0);
+
+            if (hasNew)
+            {
+              postToHost("new_message", { unread: afterUnread, delta });
+
+              if (urgent)
+              {
+                postToHost("urgent_message", {
+                  unread: afterUnread,
+                  delta,
+                  reason: (delta !== null && delta > 1) ? "batch" : (inCooldown ? "cooldown" : "unknown_to_known")
+                });
+
+                if (ok) {
+                  lastManualCloseAt = 0;
+                  tryShow();
+                }
+              }
+
+              if (!document.body.classList.contains("beamer-open")) pulseBell();
+            }
+
+            if (ok && shouldReopenAfterRefresh(wasOpen)) {
+              tryShow();
+            }
+          } finally {
+            refreshing = false;
+          }
         }
 
         window.__BV_FORCE_OPEN__ = function () {
@@ -453,30 +468,45 @@
             button: false,
             alert: false,
             callback: function () {
-              syncOpenState();
+              scheduleSync(30);
               if (autoOpen) tryShow();
             },
             onerror: function () {
-              syncOpenState();
+              scheduleSync(30);
             }
           };
 
-          await loadBeamerScript();
-          await waitForBeamerReady();
+          try {
+            await loadBeamerScript();
+            await waitForBeamerReady();
+          } catch (_) {
+            postToHost("boot_error", { reason: "beamer_script_load_failed" });
+            return;
+          }
 
           forceBellVisible();
+          scheduleSync(30);
 
-          bellEl().addEventListener("click", () => {
-            lastManualCloseAt = 0;
-            tryShow();
-          });
+          const bell = bellEl();
+          if (bell) {
+            bell.addEventListener("click", () => {
+              lastManualCloseAt = 0;
+              tryShow();
+            });
+          }
 
           if (autoOpen) tryShow();
 
           if (refreshTimer) clearInterval(refreshTimer);
-          if (Number.isFinite(refreshMs) && refreshMs >= 1500) {
+          if (Number.isFinite(refreshMs) && refreshMs >= 15000) {
             refreshTimer = setInterval(refreshBeamerPreserveState, refreshMs);
           }
+
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+          heartbeatTimer = setInterval(() => {
+            forceBellVisible();
+            scheduleSync(30);
+          }, 2000);
         };
       })();
     </script>

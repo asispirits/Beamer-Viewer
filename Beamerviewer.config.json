@@ -1,10 +1,13 @@
 {
   "ProductId": "vEjlRlWp82033",
   "UserId": "",
-  "RefreshMs": 5000,
+  "RefreshMs": 60000,
   "WidgetWidth": 520,
   "AutoOpenOnLaunch": true,
   "ManualCloseCooldownMs": 6000,
   "PulseOnNewMessage": true,
-  "PulseMinIntervalMs": 15000
+  "PulseMinIntervalMs": 15000,
+  "ForceForegroundOnUrgent": false,
+  "UrgentFocusUnreadDelta": 3,
+  "FocusStealCooldownMs": 45000
 }

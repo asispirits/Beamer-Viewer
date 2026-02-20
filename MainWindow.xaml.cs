@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -21,6 +22,7 @@ public partial class MainWindow
   private readonly string _cfgPath;
 
   private bool _allowClose;
+  private DateTime _lastForcedForegroundAt = DateTime.MinValue;
 
   private const int WM_CLOSE = 0x0010;
   private const int WM_SYSCOMMAND = 0x0112;
@@ -120,8 +122,15 @@ public partial class MainWindow
   {
     var asm = typeof(MainWindow).Assembly;
     var res = asm.GetManifestResourceNames()
-      .First(n => n.EndsWith(fileName, StringComparison.OrdinalIgnoreCase));
-    using var s = asm.GetManifestResourceStream(res)!;
+      .FirstOrDefault(n => n.EndsWith(fileName, StringComparison.OrdinalIgnoreCase));
+
+    if (string.IsNullOrWhiteSpace(res))
+      throw new FileNotFoundException($"Embedded resource not found: {fileName}");
+
+    using var s = asm.GetManifestResourceStream(res);
+    if (s is null)
+      throw new FileNotFoundException($"Embedded resource stream not found: {fileName}");
+
     using var r = new StreamReader(s);
     return r.ReadToEnd();
   }
@@ -169,7 +178,11 @@ public partial class MainWindow
 
     Web.CoreWebView2.Settings.IsStatusBarEnabled = false;
     Web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+#if DEBUG
     Web.CoreWebView2.Settings.AreDevToolsEnabled = true;
+#else
+    Web.CoreWebView2.Settings.AreDevToolsEnabled = false;
+#endif
 
     try { Web.CoreWebView2.Profile.PreferredTrackingPreventionLevel = CoreWebView2TrackingPreventionLevel.None; } catch { }
 
@@ -189,8 +202,20 @@ public partial class MainWindow
 
         if (type == "urgent_message")
         {
-          Dispatcher.Invoke(() => BringToFront(force: true));
-          _ = Dispatcher.InvokeAsync(async () => await ForceOpenWidgetAsync());
+          int? delta = null;
+          if (doc.RootElement.TryGetProperty("payload", out var payload) &&
+              payload.ValueKind == JsonValueKind.Object &&
+              payload.TryGetProperty("delta", out var d))
+          {
+            if (d.ValueKind == JsonValueKind.Number && d.TryGetInt32(out var dInt)) delta = dInt;
+          }
+
+          var force = Dispatcher.Invoke(() => ShouldForceForegroundForUrgent(delta));
+          Dispatcher.Invoke(() => BringToFront(force));
+          if (force)
+          {
+            _ = Dispatcher.InvokeAsync(async () => await ForceOpenWidgetAsync());
+          }
           return;
         }
       }
@@ -214,9 +239,34 @@ public partial class MainWindow
       CoreWebView2HostResourceAccessKind.Allow
     );
 
-    Web.CoreWebView2.NavigationCompleted += async (_, _) => { await InjectConfigAndBootAsync(); };
+    Web.CoreWebView2.NavigationCompleted += async (_, e) =>
+    {
+      if (!e.IsSuccess) return;
+      try
+      {
+        await InjectConfigAndBootAsync();
+      }
+      catch (Exception ex)
+      {
+        Debug.WriteLine($"InjectConfigAndBootAsync failed: {ex}");
+      }
+    };
 
     Web.Source = new Uri($"https://{HostName}/index.html");
+  }
+
+  private bool ShouldForceForegroundForUrgent(int? unreadDelta)
+  {
+    if (WindowState == WindowState.Minimized) return true;
+
+    if (_cfg.FocusStealCooldownMs > 0 && _lastForcedForegroundAt != DateTime.MinValue)
+    {
+      var elapsedMs = (DateTime.UtcNow - _lastForcedForegroundAt).TotalMilliseconds;
+      if (elapsedMs >= 0 && elapsedMs < _cfg.FocusStealCooldownMs) return false;
+    }
+
+    if (_cfg.ForceForegroundOnUrgent) return true;
+    return unreadDelta.HasValue && unreadDelta.Value >= _cfg.UrgentFocusUnreadDelta;
   }
 
   private void BringToFront(bool force)
@@ -240,13 +290,28 @@ public partial class MainWindow
         var fg = GetForegroundWindow();
         var fgThread = GetWindowThreadProcessId(fg, IntPtr.Zero);
         var curThread = GetCurrentThreadId();
-        AttachThreadInput(curThread, fgThread, true);
-        SetForegroundWindow(hwnd);
-        AttachThreadInput(curThread, fgThread, false);
+        var attached = false;
+
+        try
+        {
+          if (fg != IntPtr.Zero && fgThread != 0 && fgThread != curThread)
+          {
+            attached = AttachThreadInput(curThread, fgThread, true);
+          }
+          SetForegroundWindow(hwnd);
+        }
+        finally
+        {
+          if (attached)
+          {
+            AttachThreadInput(curThread, fgThread, false);
+          }
+        }
 
         var wasTop = Topmost;
         Topmost = true;
         Topmost = wasTop;
+        _lastForcedForegroundAt = DateTime.UtcNow;
       }
       else
       {
@@ -303,6 +368,9 @@ public partial class MainWindow
       manual_close_cooldown_ms = _cfg.ManualCloseCooldownMs,
       pulse_on_new_message = _cfg.PulseOnNewMessage,
       pulse_min_interval_ms = _cfg.PulseMinIntervalMs,
+      force_foreground_on_urgent = _cfg.ForceForegroundOnUrgent,
+      urgent_focus_unread_delta = _cfg.UrgentFocusUnreadDelta,
+      focus_steal_cooldown_ms = _cfg.FocusStealCooldownMs,
       config_path = _cfgPath
     };
 
