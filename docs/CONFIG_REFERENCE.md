@@ -39,7 +39,7 @@ At startup, the app resolves config in this order:
   "LaunchWatchdogIntervalMinutes": 30,
   "Ui": {
     "EnableSecretMenu": false,
-    "AppTitle": "Notifications Widget Demo"
+    "AppTitle": "Notifications"
   }
 }
 ```

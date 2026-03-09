@@ -1,12 +1,12 @@
-# Notifications Widget Demo
+# Notifications Widget
 
-This project is a widget-based demo variant of Notifications.
+This project is the production widget-based Notifications application.
 
 It uses the Beamer embed widget inside the app WebView2 UI and does not use the app's internal API polling flow.
 
-## Project Copy
+## Project Folder
 
-This demo lives in a separate folder:
+This production widget build lives in:
 
 `<parent-folder>/Notifications_widget`
 

@@ -235,7 +235,7 @@
       window.__NW_BOOT__ = {
         autoOpen: cfg.auto_open_on_launch !== false,
         enableSecretMenu: Boolean(cfg.enable_secret_menu),
-        appTitle: String(cfg.app_title || 'Notifications Widget Demo'),
+        appTitle: String(cfg.app_title || 'Notifications'),
         refreshMs: Number(cfg.refresh_ms || 30000),
         segmentFilters
       };
@@ -293,7 +293,7 @@
 
       function updateDiag() {
         diagPanel.textContent = [
-          `App: ${boot.appTitle || 'Notifications Widget Demo'}`,
+          `App: ${boot.appTitle || 'Notifications'}`,
           `Product ID: ${window.beamer_config?.product_id || ''}`,
           `User ID: ${window.beamer_config?.user_id || ''}`,
           `Segments: ${boot.segmentFilters || '(none)'}`,
